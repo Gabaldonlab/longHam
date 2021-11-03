@@ -209,7 +209,7 @@ def rename_contigs(outfileName,infileName,tag):
     outfile.close()
     
 
-def create_receipt(main_assembly,reference1,reference2,reference_genome,ragout_folder,tag):
+def create_receipt(main_assembly,reference1,reference2,reference_genome,ragout_folder):
     outfile = open(ragout_folder+"/receipt.txt","w")
     if reference_genome:
         print(".references = ref_genome,ref1,ref2",file=outfile)
@@ -375,6 +375,7 @@ def build_canu_assembly(primary_assemblies,genome_size):
     create_folder(canu_output)
     os.chdir(canu_output)
     assemblyCANU = assemblyOutput+"/canu_assembly.fasta"
+    print(assemblyCANU)
     if not os.path.exists(assemblyCANU):
         canu_whole(args.reads_nanopore,str(genome_size),args.reads_type,assemblyCANU)
 
@@ -382,7 +383,7 @@ def build_canu_assembly(primary_assemblies,genome_size):
 
     corrected_nanopore = canu_output+"/canu.correctedReads.fasta"
     
-    return primary_assemblies,corrected_nanopore
+    return primary_assemblies,corrected_nanopore,canu_output
 
 def build_wtdbg2_assembly(corrected_nanopore,primary_assemblies):
 
@@ -398,7 +399,7 @@ def build_wtdbg2_assembly(corrected_nanopore,primary_assemblies):
         assemblyWTDBG2 = None
     return primary_assemblies
 
-def subsample_long_reads(long_reads_corrected,genome_size):
+def subsample_long_reads(long_reads_corrected,genome_size,canu_output):
     #Cut corrected reads and only take 30X coverage
     seqs,coverage = calculate_coverage(long_reads_corrected,genome_size)
 
@@ -409,13 +410,12 @@ def subsample_long_reads(long_reads_corrected,genome_size):
         reads_names = sorted(reads_names,key=lambda x: len(seqs[x]))
         reads_names.reverse()
         seqs2 = get_nanopore_subset(seqs,reads_names,genome_size,args.nanopore_coverage)
-        #Since it is possible that the canu folder does not exists because canu data was taken from a previous run, we create it here
-        create_folder(canu_output+"/canu/")
-        corrected_nanopore = canu_output+"/canu/canu.correctedReads."+str(args.nanopore_coverage)+"X.fasta"
+        corrected_nanopore = canu_output+"/canu.correctedReads."+str(args.nanopore_coverage)+"X.fasta"
         outfile = open(corrected_nanopore,"w")
         for code in seqs2:
             print_sequence(code,seqs2[code],outfile)
         outfile.close()
+    return corrected_nanopore
 
 
 def build_scaffolding_assemblies(corrected_nanopore,platanusFile,sparseFile,primary_assemblies):
@@ -447,6 +447,82 @@ def build_scaffolding_assemblies(corrected_nanopore,platanusFile,sparseFile,prim
         print("Sparse + DBG2OLC assembly failed")
     return primary_assemblies
 
+def build_masurca_assembly(primary_assemblies):
+    masurca_output = args.outputFolder+"/masurca/"
+    create_folder(masurca_output)
+    os.chdir(masurca_output)
+    assemblyM = assemblyOutput+"/masurca_assembly.fasta"
+    if not os.path.exists(assemblyM):
+        adapt_config_file_masurca(args.reads_ill1,args.reads_ill2,args.reads_nanopore,args.threads,args.reads_type,args.nanopore_coverage)
+        assemble_masurca()
+    primary_assemblies["masurca"] = assemblyM
+    return primary_assemblies
+
+def correct_primary_assemblies(primary_assemblies,reads_ill1,reads_ill2):
+    #Correct genome assemblies
+    os.chdir(args.outputFolder)
+    correction_output = args.outputFolder+"/correction"
+    create_folder(correction_output)
+
+    corrected_assemblies = {}
+    for assem in primary_assemblies:
+        correction_output1 = correction_output+"/"+assem+"/"
+        corrected_assembly = args.outputFolder+"/assemblies/"+assem+"_assembly.corrected.fasta"
+        corrected_assemblies[assem] = corrected_assembly
+        if not os.path.exists(corrected_assembly):
+            correct_assembly(primary_assemblies[assem],correction_output1,1,corrected_assembly,str(args.threads),reads_ill1,reads_ill2,assem)
+    return corrected_assemblies
+
+def assess_assemblies(corrected_assemblies):
+    #Assess assemblies
+    info = {}
+    for assem in corrected_assemblies:
+        size,NContigs1kb,Ncontigs,N50,L50 = calculate_genome_stats(corrected_assemblies[assem],toprint=False)
+        diff = abs(genome_size - size)
+        info[assem] = [diff,size,NContigs1kb,Ncontigs,N50,L50]
+
+    assems = list(info.keys())
+    assems = sorted(assems,key=lambda x:info[x][0])
+    valid_assemblies = []
+    for assem in assems:
+        p = info[assem][1] / genome_size * 100.0
+        if p < 70.0 or p > 130.0:
+            print("Assembly ",assem,"has more than 30% variation compared to the reference genome size provided. This assembly will not be used")
+        else:
+            valid_assemblies.append(assem)
+
+    return valid_assemblies,info
+
+def ragout_analysis(valid_assemblies,info,corrected_assemblies):
+    correction_output = args.outputFolder+"/correction"
+    if len(valid_assemblies) < 3:
+        exit("There were not enough valid assemblies to use Ragout. The pipeline will finish here")
+    else:
+        valid_assemblies = sorted(valid_assemblies,key=lambda x:info[x][2])
+        best1 = valid_assemblies[0]
+        refAssem1 = corrected_assemblies[best1]
+        best2 = valid_assemblies[1]
+        refAssem2 = corrected_assemblies[best2]
+        others = valid_assemblies[2:]
+        ragout_folder = args.outputFolder+"/ragout/"
+        create_folder(ragout_folder)
+        os.chdir(ragout_folder)
+        ragout_assemblies = []
+        for assem in others:
+            try:
+                ragout1_folder = ragout_folder + "/target_"+assem
+                create_folder(ragout1_folder)
+                if not os.path.exists(ragout1_folder+"/scaffolds/target_scaffolds.fasta"):
+                    main_assembly = corrected_assemblies[assem]
+                    create_receipt(main_assembly,refAssem1,refAssem2,args.reference_genome,ragout1_folder)
+                    run_ragout(ragout1_folder)
+                ragout_assembly = assemblyOutput+"/ragout_"+str(assem)+".fasta"
+                rename_contigs(ragout_assembly,ragout1_folder+"/scaffolds/target_scaffolds.fasta","Ragout_"+assem)
+                correction_output1 = correction_output+"/ragout_"+assem+"/"
+                corrected_assembly = assemblyOutput+"/ragout_"+str(assem)+".corrected.fasta"
+                correct_assembly(ragout_assembly,correction_output1,3,corrected_assembly,str(args.threads),reads_ill1,reads_ill2,"Ragout_"+assem)
+            except:
+                print("Ragout with "+assem+" failed to produce an assembly")
 
 parser = argparse.ArgumentParser(description="Needed to calculate different statistics from the clusters")
 parser.add_argument("-s1",dest="reads_ill1",action="store",required=True,help="Illumina reads 1")
@@ -456,7 +532,7 @@ parser.add_argument("-o",dest="outputFolder",action="store",required=True,help="
 parser.add_argument("-t",dest="threads",action="store",type=int,default=8,help="Number of threads")
 parser.add_argument("-g",dest="genome_size",action="store",required=True,help="Estimated genome size")
 parser.add_argument("-r",dest="reference_genome",action="store",default=None,help="Reference genome path if it's used for scaffolding")
-parser.add_argument("-c",dest="nanopore_coverage",action="store",type=int,default=None,help="Limits the nanopore coverage")
+parser.add_argument("-c",dest="nanopore_coverage",action="store",type=int,default=30,help="Limits the nanopore coverage, set to 0 if you don't want to use this filter")
 parser.add_argument("--reads_type",dest="reads_type",action="store",default="nanopore",help="Which kind of long reads we have")
 args = parser.parse_args()
 
@@ -473,86 +549,23 @@ primary_assemblies = {}
 
 reads_ill1,reads_ill2,platanusFile,sparseFile = build_illumina_assemblies()
 
-primary_assemblies,corrected_nanopore = build_canu_assembly(primary_assemblies,genome_size)
+primary_assemblies,corrected_nanopore,canu_output = build_canu_assembly(primary_assemblies,genome_size)
 
 if not os.path.exists(corrected_nanopore):
     exit("For some reason corrected nanopore reads do not exists, please, check out that CANU ran correctly and that the corrected reads are uncompressed")
 
 primary_assemblies = build_wtdbg2_assembly(corrected_nanopore,primary_assemblies)
 
+corrected_nanopore = subsample_long_reads(corrected_nanopore,genome_size,canu_output)
 
-if args.nanopore_coverage:
-    subsample_long_reads(corrected_nanopore,genome_size)
+primary_assemblies = build_scaffolding_assemblies(corrected_nanopore,platanusFile,sparseFile,primary_assemblies)
 
-build_scaffolding_assemblies(corrected_nanopore,platanusFile,sparseFile,primary_assemblies)
+primary_assemblies = build_masurca_assembly(primary_assemblies)
 
-masurca_output = args.outputFolder+"/masurca/"
-create_folder(masurca_output)
-os.chdir(masurca_output)
-assemblyM = assemblyOutput+"/masurca_assembly.fasta"
-if not os.path.exists(assemblyM):
-    adapt_config_file_masurca(args.reads_ill1,args.reads_ill2,args.reads_nanopore,args.threads,args.reads_type,args.nanopore_coverage)
-    assemble_masurca()
-primary_assemblies["masurca"] = assemblyM
+corrected_assemblies = correct_primary_assemblies(primary_assemblies,reads_ill1,reads_ill2)
 
-
-#Correct genome assemblies
-os.chdir(args.outputFolder)
-correction_output = args.outputFolder+"/correction"
-create_folder(correction_output)
-
-corrected_assemblies = {}
-for assem in primary_assemblies:
-    correction_output1 = correction_output+"/"+assem+"/"
-    corrected_assembly = args.outputFolder+"/assemblies/"+assem+"_assembly.corrected.fasta"
-    corrected_assemblies[assem] = corrected_assembly
-    if not os.path.exists(corrected_assembly):
-        correct_assembly(primary_assemblies[assem],correction_output1,1,corrected_assembly,str(args.threads),reads_ill1,reads_ill2,assem)
-
+valid_assemblies,info = assess_assemblies(corrected_assemblies)
  
-#Assess assemblies
-info = {}
-for assem in corrected_assemblies:
-    size,NContigs1kb,Ncontigs,N50,L50 = calculate_genome_stats(corrected_assemblies[assem],toprint=False)
-    diff = abs(genome_size - size)
-    info[assem] = [diff,size,NContigs1kb,Ncontigs,N50,L50]
+ragout_analysis(valid_assemblies,info,corrected_assemblies)
 
-assems = list(info.keys())
-assems = sorted(assems,key=lambda x:info[x][0])
-valid_assemblies = []
-for assem in assems:
-    p = info[assem][1] / genome_size * 100.0
-    if p < 30.0 or p > 130.0:
-        print("Assembly ",assem,"has more than 30% variation compared to the reference genome size provided. This assembly will not be used")
-    else:
-        valid_assemblies.append(assem)
-
-if len(valid_assemblies) < 3:
-    exit("There were not enough valid assemblies to use Ragout. The pipeline will finish here")
-else:
-    valid_assemblies = sorted(valid_assemblies,key=lambda x:info[x][2])
-    best1 = valid_assemblies[0]
-    refAssem1 = corrected_assemblies[best1]
-    best2 = valid_assemblies[1]
-    refAssem2 = corrected_assemblies[best2]
-    others = valid_assemblies[2:]
-    ragout_folder = args.outputFolder+"/ragout/"
-    create_folder(ragout_folder)
-    os.chdir(ragout_folder)
-    ragout_assemblies = []
-    for assem in others:
-        try:
-            ragout1_folder = ragout_folder + "/target_"+assem
-            create_folder(ragout1_folder)
-            if not os.path.exists(ragout1_folder+"/scaffolds/target_scaffolds.fasta"):
-                main_assembly = corrected_assemblies[assem]
-                create_receipt(main_assembly,refAssem1,refAssem2,args.reference_genome,ragout1_folder,"masurca")
-                run_ragout(ragout1_folder)
-            ragout_assembly = assemblyOutput+"/ragout_"+str(assem)+".fasta"
-            rename_contigs(ragout_assembly,ragout1_folder+"/scaffolds/target_scaffolds.fasta","Ragout_"+assem)
-            correction_output1 = correction_output+"/ragout_"+assem+"/"
-            corrected_assembly = assemblyOutput+"/ragout_"+str(assem)+".corrected.fasta"
-            correct_assembly(ragout_assembly,correction_output1,3,corrected_assembly,str(args.threads),reads_ill1,reads_ill2,"Ragout_"+assem)
-        except:
-            print("Ragout with "+assem+" failed to produce an assembly")
 
