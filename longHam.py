@@ -42,6 +42,10 @@ wtdbg2_path = cluster_path+"mmarcet/nanopore/programs/wtdbg2/"
 
 #Checks if a folder exists and if not creates it		
 def create_folder(name):
+    """ Creates a folder after checking whether it exists or not.
+    Input --> name of the folder
+    Output --> None
+    """
     if not os.path.exists(name):
         cmd = "mkdir "+name
         try:
@@ -49,9 +53,18 @@ def create_folder(name):
         except:
             print("Unable to create directory ",name)
 
-#This function will execute a command in bash
-def run_command(cmd,ommit):
-    if ommit:
+
+def run_command(cmd,omit):
+    """ Executes a bash command, you can choose whether the program will
+    continue if it fails or it stops.
+    
+    Input --> cmd : command line you want to execute
+              omit: whether the program should exit if the command fails
+              
+    Output --> None
+    """
+    
+    if omit:
         try: process = sp.Popen(cmd,shell=True)
         except: pass
         process.communicate("Y\n")
@@ -68,53 +81,96 @@ def run_command(cmd,ommit):
 ########################################################################
 
 def trim_illumina_reads(reads1,reads2):
-    #cmd = "java -jar "+trimmomatic_path+" PE "+reads1+" "+reads2+" reads.paired.1.fastq reads.unpaired.1.fastq reads.paired.2.fastq reads.unpaired.2.fastq ILLUMINACLIP:"+adapters_file+":2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36"
+    """ Trim illumina reads using trimmomatic
+        
+        Input --> reads1 and reads2: the two fastq files containing illumina reads
+        
+        Output --> None
+    """
     cmd = trimmomatic_path+" PE "+reads1+" "+reads2+" reads.paired.1.fastq reads.unpaired.1.fastq reads.paired.2.fastq reads.unpaired.2.fastq ILLUMINACLIP:"+adapters_file+":2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36"
-    print(cmd)
     run_command(cmd,False)
     
 def platanus_assembly():
+    """ Performs platanus assembly
+        
+        Input --> None
+        
+        Output --> None
+    """
+    
     create_folder("platanus")
     os.chdir("platanus")
     cmd = platanus_path+" assemble -f ../reads.paired* -t "+str(args.threads)
-    print(cmd)
     run_command(cmd,False)
     cmd = "cp out_contig.fa ../../assemblies/platanus_assembly.fasta"
     run_command(cmd,False)
     os.chdir("../")
 
 def sparse_assembly():
+    """ Performs sparse assembly
+        
+        Input --> None
+        
+        Output --> None
+    """
+    
     create_folder("sparse")
     os.chdir("sparse")
     cmd = sparse_path+" GS "+args.genome_size+" LD 0 k 51 g 15 NodeCovTh 1 EdgeCovTh 0 f ../reads.paired.1.fastq f ../reads.paired.2.fastq"
-    print(cmd)
     run_command(cmd,False)
     cmd = "cp Contigs.txt ../../assemblies/sparse_assembly.fasta"
     run_command(cmd,False)
     os.chdir("../")
 
-def canu_whole(nanoporeFile,genomeSize,tag,outAssem):
-    if tag == "nanopore":
-        cmd = canu_path+" -d '.' -p canu -useGrid=False genomeSize="+genomeSize+" maxMemory=32G maxThreads=25 -nanopore-raw "+nanoporeFile
-    elif tag == "pacbio":
-        cmd = canu_path+" -correct -d '.' -p canu -useGrid=False genomeSize="+genomeSize+" maxMemory=32G maxThreads=25 -pacbio-raw "+nanoporeFile
-    print(cmd)
+def canu_whole(readsLong,genomeSize,read_type,outAssem):
+    """ Performs CANU assembly
+        
+        Input --> nanoporeFile : File containing the long reads. These should already be trimmed and adaptors should be removed
+                  genomeSize : Estimated genome size provided by the user
+                  read_type : whether the reads come from Nanopore or Pacbio
+                  outAssem : Location where all the intermediate assemblies are placed
+        
+        Output --> None
+    """
+    if read_type == "nanopore":
+        cmd = canu_path+" -d '.' -p canu -useGrid=False genomeSize="+genomeSize+" maxMemory=32G maxThreads=25 -nanopore-raw "+readsLong
+    elif read_type == "pacbio":
+        cmd = canu_path+" -correct -d '.' -p canu -useGrid=False genomeSize="+genomeSize+" maxMemory=32G maxThreads=25 -pacbio-raw "+readsLong
     run_command(cmd,False)
     cmd = "gunzip canu.correctedReads.fasta.gz"
     run_command(cmd,False)
     cmd = "cp canu.contigs.fasta "+outAssem
     run_command(cmd,False)
 
-def assemble_DBG2OLC(nanoporeFile,illumina_assembly_file,outputfolder,outputName):
+def assemble_DBG2OLC(readsLong,illumina_assembly_file,outputfolder,outputName):
+    """ Performs a DBG2OLC assembly using a previously constructed illumina assembly
+        
+        Input --> readsLong : File containing the long reads. These should already be trimmed and adaptors should be removed
+                  illumina_assembly_file : file containing the contigs of the illumina assembly
+                  ouputfolder : folder where the analysis will be run
+                  outputName : tag refering to which illumina assembly you are using. Will appear in the output file
+        
+        Output --> None
+    """
+    
     os.chdir(outputfolder)
-    cmd = DBG2OLC_path+" k 17 AdaptiveTh 0.01 KmerCovTh 10 MinOverlap 100 RemoveChimera 2 ContigTh 2 Contigs "+illumina_assembly_file+" f "+nanoporeFile
-    print(cmd)
+    cmd = DBG2OLC_path+" k 17 AdaptiveTh 0.01 KmerCovTh 10 MinOverlap 100 RemoveChimera 2 ContigTh 2 Contigs "+illumina_assembly_file+" f "+readsLong
     run_command(cmd,False)
     cmd = "cp backbone_raw.fasta ../../assemblies/DBG2OLC_"+outputName+".fasta"
-    print(cmd)
     run_command(cmd,False)
 
 def adapt_config_file_masurca(reads_ill1,reads_ill2,readsLong,threads,read_type,coverage):
+    """ Builds the masurca configuration file
+        
+        Input --> reads_ill1 and reads_ill2 : files belonging to the illumina reads
+                  readsLong : File containing the long reads. These should already be trimmed and adaptors should be removed
+                  threads : number of threads available
+                  read_type : whether the reads come from Nanopore or Pacbio
+                  coverage : Masurca filters long reads to keep a given coverage, 
+                    if none is provided it will be kept at 30 as indicated by Masurca's default
+        
+        Output --> None
+    """
     cmd = "cp "+masurca_master_config+" config.txt"
     run_command(cmd,False)
     outfile = open("config2.txt","w")
@@ -142,6 +198,13 @@ def adapt_config_file_masurca(reads_ill1,reads_ill2,readsLong,threads,read_type,
     run_command(cmd,False)
 
 def assemble_masurca():
+    """ Performs Masurca assembly
+        
+        Input --> None
+        
+        Output --> None
+    """
+    
     cmd = masurca_path+" config.txt"
     run_command(cmd,False)
     cmd = "./assemble.sh"
@@ -150,6 +213,15 @@ def assemble_masurca():
     run_command(cmd,False)
 
 def align_illumina_reads(assembly,alignment,threads,illReads1,illReads2):
+    """ Performs read mapping to assembly
+        
+        Input --> assembly : file where the assembly is located
+                  alignment : base file name for the outputs
+                  threads : number of threads used
+                  illReads1 and illReads2 : Files containing illumina reads
+        
+        Output --> None
+    """
     cmd = bwa_path+" index "+assembly
     run_command(cmd,False)
     if not os.path.exists(alignment+".sam"):
@@ -167,10 +239,26 @@ def align_illumina_reads(assembly,alignment,threads,illReads1,illReads2):
         run_command(cmd,True)
 
 def run_pilon(alignmentFile,genome,folderName,threads):
+    """ Performs pilon correction
+        
+        Input --> alignmentFile : Name where the BWA read mapping result is
+                  genome : Name of the assembly file
+                  folderName : name of the output folder
+                  threads : Number of threads that can be used
+        
+        Output --> None
+    """
     cmd = "java -Xmx96G -jar "+pilon_path+" --genome "+genome+" --bam "+alignmentFile+".sorted.bam --outdir "+folderName+" --vcf --changes --threads " +threads
     run_command(cmd,False)
 
 def rename_contigs_pilon(folderName):
+    """ Changes the name of the resulting pilon fasta so that another round of correction can be performed
+        
+        Input --> folderName: Folder where the previous run of pilon was executed
+        
+        Output --> Name for the new file, which will be the new input genome for Pilon
+    """
+    
     genome = folderName+"/pilon_corrected.fasta"
     outfile = open(genome,"w")
     for line in open(folderName+"/pilon.fasta"):
@@ -182,6 +270,18 @@ def rename_contigs_pilon(folderName):
     return genome
 
 def correct_assembly(genome,outDir,repetitions,outfileName,threads,illReads1,illReads2,tag):
+    """ Main module to correct assemblies, calls all the other submodules
+        
+        Input --> genome : Assembly that you want to correct
+                  outDir : folder where correction will be performed
+                  repetitions : number of correction rounds you want to execute
+                  outfileName : Name of the file to which the corrected assembly should be printed
+                  threads : Number of threads available to perform the analysis
+                  illReads1 and illReads2 : Files containing illumina reads
+                  tag : short name refering to which assembly is being corrected
+        
+        Output --> None
+    """
     create_folder(outDir)
     original_genome = genome
     for a in range(0,repetitions):
@@ -199,6 +299,16 @@ def correct_assembly(genome,outDir,repetitions,outfileName,threads,illReads1,ill
     run_command(cmd,False)
     
 def rename_contigs(outfileName,infileName,tag):
+    """ Renames contigs after the correcting step has been completed. 
+        Will make sure each assembly in the assemblies folder has a 
+        unique naming and contigs are sorted from longer to shorter
+        
+        Input --> outfileName : file where the renamed genome will be printed
+                  infileName : file containing the genome
+                  tag : short name that will be used in the header of the sequences
+        
+        Output --> None
+    """
     outfile = open(outfileName,"w")
     seqs = load_sequences(infileName,"")
     contigs = list(seqs.keys())
@@ -210,6 +320,17 @@ def rename_contigs(outfileName,infileName,tag):
     
 
 def create_receipt(main_assembly,reference1,reference2,reference_genome,ragout_folder):
+    """ Creates a receipt for Ragout
+        
+        Input --> main_assembly : this assembly will be the target assembly
+                  reference1 and reference2 : assemblies used as references
+                  reference_genome : If the user has provided a reference 
+                     genome this will be used here to help ragout
+                  ragout_folder : Folder where Ragout will be executed
+        
+        Output --> None
+    """
+    
     outfile = open(ragout_folder+"/receipt.txt","w")
     if reference_genome:
         print(".references = ref_genome,ref1,ref2",file=outfile)
@@ -225,18 +346,41 @@ def create_receipt(main_assembly,reference1,reference2,reference_genome,ragout_f
     outfile.close()
     
 def run_ragout(ragout_folder):
+    """ Performs ragout assembly
+        
+        Input --> ragout_folder : name of the folder where Ragout will be run
+        
+        Output --> None
+    """
     cmd = "python2 "+ragout_path+" -o "+ragout_folder+"/scaffolds -t "+str(args.threads)+" "+ragout_folder+"/receipt.txt"
     run_command(cmd,False)
 
-def calculate_coverage(nanoporeFile,genome_size):
+def calculate_coverage(readsLong,genome_size):
+    """ Calculates the coverage for a set of reads
+        
+        Input --> readsLong : File containing the long reads
+                  genome_size : estimated genome size provided by the user
+        
+        Output --> seqs : dictionary containing a set of long reads
+                   coverage : calculated coverage of the reads
+    """
     size = 0
-    seqs = load_sequences(nanoporeFile,"")
+    seqs = load_sequences(readsLong,"")
     for code in seqs:
         size += len(seqs[code])
     coverage = float(size) / genome_size
     return seqs,coverage
 
-def get_nanopore_subset(seqs,reads_names,genome_size,coverage):
+def get_longRead_subset(seqs,reads_names,genome_size,coverage):
+    """ Gets a subset of reads that has a certain coverage
+        
+        Input --> seqs : dictionary containing the long reads
+                  reads_names : list with a set of read_names, sorted by size from biggest to smallest
+                  genome_size : estimated genome size provided by the user
+                  coverage : desired coverage at which reads should be trimmed
+        
+        Output --> seqs2 : Downsized set of reads
+    """
     seqs2 = {}
     counting_size = 0
     counting_coverage = 0
@@ -246,7 +390,7 @@ def get_nanopore_subset(seqs,reads_names,genome_size,coverage):
         counting_coverage = int(float(counting_size) / genome_size)
         if counting_coverage >= coverage:
             break
-    print(len(seqs2),"sequences selected with a coverage of ",counting_coverage)
+    # ~ print(len(seqs2),"sequences selected with a coverage of ",counting_coverage)
     return seqs2
 
 def load_sequences(contigFile,delimiter):
@@ -409,7 +553,7 @@ def subsample_long_reads(long_reads_corrected,genome_size,canu_output):
         reads_names = seqs.keys()
         reads_names = sorted(reads_names,key=lambda x: len(seqs[x]))
         reads_names.reverse()
-        seqs2 = get_nanopore_subset(seqs,reads_names,genome_size,args.nanopore_coverage)
+        seqs2 = get_longRead_subset(seqs,reads_names,genome_size,args.nanopore_coverage)
         corrected_nanopore = canu_output+"/canu.correctedReads."+str(args.nanopore_coverage)+"X.fasta"
         outfile = open(corrected_nanopore,"w")
         for code in seqs2:
