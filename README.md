@@ -2,11 +2,7 @@
 
 LongHam is an assembly pipeline designed to assemble small fungal genomes based on a combination of long and short reads. The pipeline proceeds as follows:
 
-1.- Read cleaning and filtering
-
-2.- Construction of primary assemblies
-
-3.- Fusion of primary assemblies
+![alt text](https://github.com/Gabaldonlab/longHam/blob/main/pipeline.png "Pipeline summary")
 
 ## Requirements
 
@@ -46,4 +42,8 @@ Other options
 - -r In the last step the user can choose to provide a reference genome independently assembled. This will only be used by Ragout to provide a more complete assembly.
 
 <i> All paths included should be full paths, relative paths will not work </i>
+
+## Outputs
+
+The main results of longHam.py will be stored in the assemblies folder within the folder you provided with the -o option. There you will find a collection of assemblies performed by the different programs. The ones named ragoutXXXX are the combined assemblies and it is up to you to choose which assembly is the one you prefer to use. Ragout will only join assemblies that have a similar genome size to the one provided. If none of the assemblies reach this size, Ragout will not run and you will be left with a set of primary assemblies.
 
