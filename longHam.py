@@ -21,20 +21,21 @@ import os
 import sys
 import subprocess as sp
 
-cluster_path = "/gpfs/projects/bsc40/current/"
-canu_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/canu"
-trimmomatic_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/trimmomatic"
-platanus_path = cluster_path+"mmarcet/nanopore/programs/platanus"
-sparse_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/SparseAssembler"
-DBG2OLC_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/DBG2OLC"
-masurca_path = cluster_path+"mmarcet/anaconda/envs/masurca/bin/masurca"
-bwa_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/bwa"
-samtools_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/samtools"
-pilon_path = cluster_path+"mmarcet/nanopore/programs/pilon-1.22.jar"
-adapters_file = cluster_path+"mmarcet/nanopore/GABALDON02/scripts/adapters_trimmonmatic/TruSeq3-PE.fa"
-masurca_master_config=cluster_path+"mmarcet/nanopore/GABALDON02/scripts/master_config_file.masurca.txt"
-ragout_path = cluster_path+"mmarcet/nanopore/programs/ragout/ragout-2.0-linux-x86_64/ragout.py"
-wtdbg2_path = cluster_path+"mmarcet/nanopore/programs/wtdbg2/"
+""" Note these paths should be changed to where the executables are located """
+cluster_path = "path2mainFolder"
+canu_path = "canu"
+trimmomatic_path = "trimmomatic"
+platanus_path = "platanus"
+sparse_path = "SparseAssembler"
+DBG2OLC_path = "DBG2OLC"
+masurca_path = "masurca"
+bwa_path = "bwa"
+samtools_path = "samtools"
+pilon_path = "pilon-1.22.jar"
+adapters_file = "TruSeq3-PE.fa"
+masurca_master_config="master_config_file.masurca.txt"
+ragout_path = "ragout.py"
+wtdbg2_path = "wtdbg2/"
 
 ########################################################################
 # Standard modules
@@ -546,7 +547,7 @@ def build_wtdbg2_assembly(corrected_nanopore,primary_assemblies):
 def subsample_long_reads(long_reads_corrected,genome_size,canu_output):
     #Cut corrected reads and only take 30X coverage
     seqs,coverage = calculate_coverage(long_reads_corrected,genome_size)
-
+    corrected_nanopore = canu_output+"/canu.correctedReads.fasta"
     if int(coverage) < args.nanopore_coverage:
         pass
     else:
@@ -712,4 +713,4 @@ valid_assemblies,info = assess_assemblies(corrected_assemblies)
  
 ragout_analysis(valid_assemblies,info,corrected_assemblies)
 
-
+print("LongHam finished successfully!")
