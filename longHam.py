@@ -669,7 +669,7 @@ def ragout_analysis(valid_assemblies,info,corrected_assemblies):
             except:
                 print("Ragout with "+assem+" failed to produce an assembly")
 
-parser = argparse.ArgumentParser(description="Needed to calculate different statistics from the clusters")
+parser = argparse.ArgumentParser(description="Pipeline to assemble genomes with long and short reads")
 parser.add_argument("-s1",dest="reads_ill1",action="store",required=True,help="Illumina reads 1")
 parser.add_argument("-s2",dest="reads_ill2",action="store",required=True,help="Illumina reads 2")
 parser.add_argument("-n",dest="reads_nanopore",action="store",required=True,help="Nanopore reads. Adapter trimming needs to be performed beforhand")
