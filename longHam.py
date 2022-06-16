@@ -21,21 +21,20 @@ import os
 import sys
 import subprocess as sp
 
-""" Note these paths should be changed to where the executables are located """
-cluster_path = "path2mainFolder"
-canu_path = "canu"
-trimmomatic_path = "trimmomatic"
-platanus_path = "platanus"
-sparse_path = "SparseAssembler"
-DBG2OLC_path = "DBG2OLC"
-masurca_path = "masurca"
-bwa_path = "bwa"
-samtools_path = "samtools"
-pilon_path = "pilon-1.22.jar"
-adapters_file = "TruSeq3-PE.fa"
-masurca_master_config="master_config_file.masurca.txt"
-ragout_path = "ragout.py"
-wtdbg2_path = "wtdbg2/"
+cluster_path = "/gpfs/projects/bsc40/current/"
+canu_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/canu"
+trimmomatic_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/trimmomatic"
+platanus_path = cluster_path+"mmarcet/nanopore/programs/platanus"
+sparse_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/SparseAssembler"
+DBG2OLC_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/DBG2OLC"
+masurca_path = cluster_path+"mmarcet/anaconda/envs/masurca/bin/masurca"
+bwa_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/bwa"
+samtools_path = cluster_path+"mmarcet/anaconda_old/envs/assembly/bin/samtools"
+pilon_path = cluster_path+"mmarcet/nanopore/programs/pilon-1.22.jar"
+adapters_file = cluster_path+"mmarcet/nanopore/GABALDON02/scripts/adapters_trimmonmatic/TruSeq3-PE.fa"
+masurca_master_config=cluster_path+"mmarcet/nanopore/GABALDON02/scripts/master_config_file.masurca.txt"
+ragout_path = cluster_path+"mmarcet/nanopore/programs/ragout/ragout-2.0-linux-x86_64/ragout.py"
+wtdbg2_path = cluster_path+"mmarcet/nanopore/programs/wtdbg2/"
 
 ########################################################################
 # Standard modules
@@ -395,6 +394,11 @@ def get_longRead_subset(seqs,reads_names,genome_size,coverage):
     return seqs2
 
 def load_sequences(contigFile,delimiter):
+    """Load sequences into memory
+        Input --> contigFile : name of the file that contains the contigs
+                  delimiter : Symbol used to split the fasta header if needed
+        Output --> seqs : Dictionary containing the sequences
+    """
     seqs = {}
     name = ""
     s = []
@@ -415,6 +419,11 @@ def load_sequences(contigFile,delimiter):
     return seqs
 
 def print_sequence(code,sequence,outfile):
+    """ Prints a single sequence into a file
+        Input --> code : Fasta header that will be printed for the sequence
+                  sequence : Sequence that will be printed
+                  outfile : handler of the file where the sequence will be printed
+    """
     print(">"+code,file=outfile)
     i = 0
     if sequence[-1] == "*":
@@ -424,6 +433,12 @@ def print_sequence(code,sequence,outfile):
         i += 60
 
 def assemble_WTDBG2(corrected_nanopore,outputFolder,assemblyWTDBG2):
+    """ Assemble the genome using the WTDBG2 program
+    Input --> corrected_nanopore : File where the previously corrected long reads can be found
+              outputFolder : FolderName where intermediate files will be stored
+              assemblyWTDBG2 : name that the assembly will have
+    """
+    
     os.chdir(outputFolder)
     cmd = wtdbg2_path+"/wtdbg2 -t "+str(args.threads)+" -i "+corrected_nanopore+" -fo prefix"
     run_command(cmd,False)
@@ -433,6 +448,10 @@ def assemble_WTDBG2(corrected_nanopore,outputFolder,assemblyWTDBG2):
     run_command(cmd,False)
 
 def get_genome_size(genome_size):
+    """ Translate provided genome size 
+    Input --> genome_size : genome size as provided by the user
+    Output --> genome_size : float value of the genome size
+    """
     if "M" in genome_size or "m" in genome_size:
         genome_size = float(genome_size.replace("M","").replace("m",""))*1000000.0
     elif "G" in genome_size or "g" in genome_size:
@@ -442,6 +461,15 @@ def get_genome_size(genome_size):
     return genome_size
 
 def calculate_genome_stats(contigsFile, toprint=True):
+    """ Calculates a set of statistics for a given genome including genome size, number of contigs and N50
+    Input --> contigsFile : File where the assembly to evaluate is found
+            toprint : If the statistics should be printed on screen
+    Output --> size : Genome size in bp
+               NContigs1kb : Number of contigs larger than 100kb
+               NContigs : Total number of contigs
+               N50 : N50 value
+               L50 : L50 value
+    """
     seqs = load_sequences(contigsFile," ")
     lengths = []
     for code in seqs:
@@ -496,6 +524,14 @@ def calculate_genome_stats(contigsFile, toprint=True):
     return size,NContigs1kb,NContigs,N50,L50
 
 def build_illumina_assemblies():
+    """ Builds the two illumina based assemblies
+        Input -> None
+        Output -> reads_ill1 : trimmed reads 1
+                  reads_ill2 : trimmed reads 2
+                  platanusFile : file containing the platanus assembly
+                  sparseFile : file containing the sparse assembly
+    """
+    
     #Create illumina assemblies
     illOutput = args.outputFolder+"/illumina"
     create_folder(illOutput)
@@ -514,13 +550,32 @@ def build_illumina_assemblies():
         sparse_assembly()
     return reads_ill1,reads_ill2,platanusFile,sparseFile
 
-def build_canu_assembly(primary_assemblies,genome_size):
+def build_canu_assembly(primary_assemblies,genome_size,canu_indep):
+    """ Builds a full assembly using CANU
+        Input -> primary_assemblies : dictionary containing all paths to the build primary assemblies
+                 genome_size : size of the genome of interest
+        output -> primary_assemblies : dictionary containing all paths to the build primary assemblies
+                  corrected_nanopore : File containing the corrected long reads
+                  canu_output : Folder where canu has been run
+    """
     #Create CANU assembly    
     canu_output = args.outputFolder+"/canu"
     create_folder(canu_output)
     os.chdir(canu_output)
     assemblyCANU = assemblyOutput+"/canu_assembly.fasta"
-    print(assemblyCANU)
+    #If a previously run of canu is provided then move the files to the apropiate places so that they can be used
+    if canu_indep:
+        if not os.path.exists(canu_indep+"/canu.contigs.fasta"):
+            exit("Was unable to find the canu.contigs.fasta file in the CANU folder provided, please check that your CANU run was successful or allow longHam to run it for you")
+        cmd = "cp "+canu_indep+"/canu.contigs.fasta "+assemblyCANU
+        run_command(cmd,False)
+        if not os.path.exists(canu_indep+"/canu.correctedReads.fasta.gz"):
+            exit("Was unable to find the corrected reads in the CANU folder provided")
+        cmd = "cp "+canu_indep+"/canu.correctedReads.fasta.gz "+canu_output+"/"
+        run_command(cmd,False)
+        cmd = "gunzip canu.correctedReads.fasta.gz"
+        run_command(cmd,False)
+    #Else build the assembly
     if not os.path.exists(assemblyCANU):
         canu_whole(args.reads_nanopore,str(genome_size),args.reads_type,assemblyCANU)
 
@@ -669,7 +724,7 @@ def ragout_analysis(valid_assemblies,info,corrected_assemblies):
             except:
                 print("Ragout with "+assem+" failed to produce an assembly")
 
-parser = argparse.ArgumentParser(description="Pipeline to assemble genomes with long and short reads")
+parser = argparse.ArgumentParser(description="Assembly program")
 parser.add_argument("-s1",dest="reads_ill1",action="store",required=True,help="Illumina reads 1")
 parser.add_argument("-s2",dest="reads_ill2",action="store",required=True,help="Illumina reads 2")
 parser.add_argument("-n",dest="reads_nanopore",action="store",required=True,help="Nanopore reads. Adapter trimming needs to be performed beforhand")
@@ -679,6 +734,7 @@ parser.add_argument("-g",dest="genome_size",action="store",required=True,help="E
 parser.add_argument("-r",dest="reference_genome",action="store",default=None,help="Reference genome path if it's used for scaffolding")
 parser.add_argument("-c",dest="nanopore_coverage",action="store",type=int,default=30,help="Limits the nanopore coverage, set to 0 if you don't want to use this filter")
 parser.add_argument("--reads_type",dest="reads_type",action="store",default="nanopore",help="Which kind of long reads we have")
+parser.add_argument("--canu_results",dest="canu_indep",action="store",default=None,help="Folder where CANU has been run")
 args = parser.parse_args()
 
 #Create output folder
@@ -694,7 +750,7 @@ primary_assemblies = {}
 
 reads_ill1,reads_ill2,platanusFile,sparseFile = build_illumina_assemblies()
 
-primary_assemblies,corrected_nanopore,canu_output = build_canu_assembly(primary_assemblies,genome_size)
+primary_assemblies,corrected_nanopore,canu_output = build_canu_assembly(primary_assemblies,genome_size,args.canu_indep)
 
 if not os.path.exists(corrected_nanopore):
     exit("For some reason corrected nanopore reads do not exists, please, check out that CANU ran correctly and that the corrected reads are uncompressed")
@@ -714,3 +770,5 @@ valid_assemblies,info = assess_assemblies(corrected_assemblies)
 ragout_analysis(valid_assemblies,info,corrected_assemblies)
 
 print("LongHam finished successfully!")
+
+
