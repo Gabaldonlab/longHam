@@ -137,8 +137,9 @@ def canu_whole(readsLong,genomeSize,read_type,outAssem):
     elif read_type == "pacbio":
         cmd = canu_path+" -correct -d '.' -p canu -useGrid=False genomeSize="+genomeSize+" maxMemory=32G maxThreads=25 -pacbio-raw "+readsLong
     run_command(cmd,False)
-    cmd = "gunzip canu.correctedReads.fasta.gz"
-    run_command(cmd,False)
+    if not os.path.exists("canu.correctedReads.fasta"):
+        cmd = "gunzip canu.correctedReads.fasta.gz"
+        run_command(cmd,False)
     cmd = "cp canu.contigs.fasta "+outAssem
     run_command(cmd,False)
 
@@ -248,8 +249,36 @@ def run_pilon(alignmentFile,genome,folderName,threads):
         
         Output --> None
     """
-    cmd = "java -Xmx96G -jar "+pilon_path+" --genome "+genome+" --bam "+alignmentFile+".sorted.bam --outdir "+folderName+" --vcf --changes --threads " +threads
+    seqs = load_sequences(genome," ")
+    outfileFasta = open(folderName+"/pilon_corrected.fasta","w")
+    outfileChanges = open(folderName+"/pilon_corrected.changes","w")
+    for contig in seqs:
+        outfile = open("contig.fa","w")
+        print_sequence(contig,seqs[contig],outfile)
+        outfile.close()
+        commands = []
+        cmd = f"{samtools_path} view -bh {folderName}/alignment.sorted.bam {contig} >contig.bam"
+        commands.append(cmd)
+        cmd = f"{samtools_path} index contig.bam"
+        commands.append(cmd)
+        cmd = "java -Xmx96G -jar "+pilon_path+" --genome contig.fa --bam contig.bam --outdir "+folderName+" --vcf --changes --threads " +threads
+        commands.append(cmd)
+        for cmd in commands:
+            print(cmd)
+            run_command(cmd,False)
+        new_seq = load_sequences(folderName+"/pilon.fasta","")
+        print_sequence(contig,new_seq[contig+"_pilon"],outfileFasta)
+        for line in open(folderName+"/pilon.changes"):
+            line = line.strip()
+            print(line,file=outfileChanges)
+    outfileFasta.close()
+    outfileChanges.close()
+    cmd = "rm contig.bam contig.fa"
     run_command(cmd,False)
+    cmd = "rm "+folderName+"/pilon.fasta "+folderName+"/pilon.changes "+folderName+"/pilon.vcf"
+    run_command(cmd,False)
+    print("FINISHED PILON")
+    return folderName+"/pilon_corrected.fasta"
 
 def rename_contigs_pilon(folderName):
     """ Changes the name of the resulting pilon fasta so that another round of correction can be performed
@@ -292,8 +321,8 @@ def correct_assembly(genome,outDir,repetitions,outfileName,threads,illReads1,ill
         print("ALIGN ILLUMINA READS")
         align_illumina_reads(genome,alignmentFile,threads,illReads1,illReads2)
         print("CORRECT WITH PILON")
-        run_pilon(alignmentFile,genome,folderName,threads)
-        genome = rename_contigs_pilon(folderName)
+        genome = run_pilon(alignmentFile,genome,folderName,threads)
+        #genome = rename_contigs_pilon(folderName)
     rename_contigs(outfileName,folderName+"/pilon_corrected.fasta",tag)
     cmd = "rm "+original_genome+".*"
     run_command(cmd,False)
@@ -573,8 +602,9 @@ def build_canu_assembly(primary_assemblies,genome_size,canu_indep):
             exit("Was unable to find the corrected reads in the CANU folder provided")
         cmd = "cp "+canu_indep+"/canu.correctedReads.fasta.gz "+canu_output+"/"
         run_command(cmd,False)
-        cmd = "gunzip canu.correctedReads.fasta.gz"
-        run_command(cmd,False)
+        if not os.path.exists("canu.correctedReads.fasta"):
+            cmd = "gunzip canu.correctedReads.fasta.gz"
+            run_command(cmd,False)
     #Else build the assembly
     if not os.path.exists(assemblyCANU):
         canu_whole(args.reads_nanopore,str(genome_size),args.reads_type,assemblyCANU)
