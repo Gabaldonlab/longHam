@@ -1,4 +1,5 @@
 # longHam
+[![DOI](https://zenodo.org/badge/422249229.svg)](https://zenodo.org/badge/latestdoi/422249229)
 
 LongHam is an assembly pipeline designed to assemble small fungal genomes based on a combination of long and short reads. The pipeline proceeds as follows:
 
